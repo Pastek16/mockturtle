@@ -54,6 +54,8 @@ private:
       return true;
     if ( try_distributivity( n ) )
       return true;
+    if ( try_3_layer_distributivity( n ) )
+	  return true;
     /* TODO: add more rules here... */
 
     return false;
@@ -61,16 +63,210 @@ private:
 
   /* Try the associativity rule on node n. Return true if the network is updated. */
   bool try_associativity( node n )
-  {
-    /* TODO */
-    return false;
-  }
+  { 	
+  	std::vector<signal> sigVec;
+  	
+	ntk.foreach_fanin( n, [&]( signal sig ){ sigVec.push_back(sig); });	//Extracts the fanin signals
+	
+	if(sigVec.size() != 2){
+		return false;	//No optimization if we don't have 2 fanin signals
+	}
+	
+	int32_t diffInLevel = ntk.level(ntk.get_node(sigVec.at(0))) - ntk.level(ntk.get_node(sigVec.at(1)));	//Signed difference in level between fanins
+	signal sigH, a;
+	
+	if(diffInLevel >= 2){	//We could benefit from inverting the associativity's parenthesis (sigVec[0] higher)
+		sigH = sigVec.at(0);
+		a = sigVec.at(1);
+	}else if(diffInLevel <= -2){	//We could benefit from inverting the associativity's parenthesis (sigVec[1] higher)
+		sigH = sigVec.at(1);
+		a = sigVec.at(0);
+	}else{
+		return false;	//No gain from associativity
+	}
 
+	if(ntk.is_complemented(sigH) == true || ntk.fanout_size(ntk.get_node(sigH)) != 1){
+		return false;	//Associativity requires uncomplemented node with no fanout here
+	}
+
+	//	Fanins of fanin
+	sigVec.clear();
+	ntk.foreach_fanin( ntk.get_node(sigH), [&]( signal sig ){ sigVec.push_back(sig); });	//Extracts the fanin signals
+
+	if(sigVec.size() != 2){
+		return false;	//No optimization if we don't have 2 fanin signals
+	}
+
+	signal b, c;
+	if( ntk.level(ntk.get_node(sigVec.at(0))) >= ntk.level(ntk.get_node(sigVec.at(1))) ){	//Sets as b the higher node, to invert with a
+		b = sigVec.at(0);
+		c = sigVec.at(1);
+	}else{
+		b = sigVec.at(1);
+		c = sigVec.at(0);
+	}
+
+ 	bool cpla = ntk.is_complemented(a), cplb = ntk.is_complemented(b);
+	if(cplb){a = !a;}
+	if(cpla){b = !b;}
+	
+	ntk.replace_in_node(n, ntk.get_node(a), b);	//Exchanges a and b
+	ntk.replace_in_node(ntk.get_node(sigH), ntk.get_node(b), a);
+
+	return true;
+  }
+  
   /* Try the distributivity rule on node n. Return true if the network is updated. */
   bool try_distributivity( node n )
   {
-    /* TODO */
-    return false;
+  	std::vector<signal> sigVec;
+  	
+	ntk.foreach_fanin( n, [&]( signal sig ){ sigVec.push_back(sig); });	//Extracts the fanin signals
+	
+	if(sigVec.size() != 2){
+		return false;	//No optimization if we don't have 2 fanin signals
+	}
+	
+	if(ntk.fanout_size(ntk.get_node(sigVec.at(0))) != 1 || ntk.fanout_size(ntk.get_node(sigVec.at(1))) != 1){
+		return false;	//Fanouts in middle nodes, can't modify them
+	}
+	
+	std::vector<signal> sigVec1, sigVec2;
+	ntk.foreach_fanin( ntk.get_node(sigVec.at(0)), [&]( signal sig ){ sigVec1.push_back(sig); });	//Extracts the fanin signals from first fanin
+	ntk.foreach_fanin( ntk.get_node(sigVec.at(1)), [&]( signal sig ){ sigVec2.push_back(sig); });	//Extracts the fanin signals from second fanin
+	
+	if(sigVec1.size() != 2 || sigVec2.size() != 2){
+		return false;	//No optimization if we don't have 2 fanin signals each
+	}
+	
+	
+	signal a,b,c,d;	//a in sigVec1, c in sigVec2, b in both always (d the occurence of b in sigVec2)
+	
+	if(ntk.node_to_index(ntk.get_node(sigVec1.at(0))) == ntk.node_to_index(ntk.get_node(sigVec2.at(0)))){	//node 1 == node 3
+		a = sigVec1.at(1);
+		b = sigVec1.at(0);
+		c = sigVec2.at(1);
+		d = sigVec2.at(0);
+	}else if(ntk.node_to_index(ntk.get_node(sigVec1.at(0))) == ntk.node_to_index(ntk.get_node(sigVec2.at(1)))){	//node 1 == node 4
+		a = sigVec1.at(1);
+		b = sigVec1.at(0);
+		c = sigVec2.at(0);
+		d = sigVec2.at(1);
+	}else if(ntk.node_to_index(ntk.get_node(sigVec1.at(1))) == ntk.node_to_index(ntk.get_node(sigVec2.at(0)))){	//node 2 == node 3
+		a = sigVec1.at(0);
+		b = sigVec1.at(1);
+		c = sigVec2.at(1);
+		d = sigVec2.at(0);
+	}else if(ntk.node_to_index(ntk.get_node(sigVec1.at(1))) == ntk.node_to_index(ntk.get_node(sigVec2.at(1)))){	//node 2 == node 4
+		a = sigVec1.at(0);
+		b = sigVec1.at(1);
+		c = sigVec2.at(0);
+		d = sigVec2.at(1);
+	}else{
+		return false;	//No distributivity possible
+	}
+
+	if(ntk.is_complemented(b) != ntk.is_complemented(d)){
+		return false;	//Distributivity requires same complement in both occurences of b
+	}
+
+	if(ntk.is_complemented(sigVec.at(0)) && ntk.is_complemented(sigVec.at(1))){	//Annoying case with output inversion
+		a = !a;
+		c = !c;
+	
+		signal newSigVec2 = ntk.create_nand(a, c);	//Creates (ac) gate with correct complement
+
+		signal nSig = ntk.create_and(b, newSigVec2);
+		
+		ntk.substitute_node(n, !nSig);	//replace current node with new signal
+
+	}else{	//Easier case with only inversions on primary inputs
+		if(ntk.is_complemented(sigVec.at(0))){	//Complement propagation
+			a = !a;
+		}
+		if(ntk.is_complemented(sigVec.at(1))){
+			c = !c;
+		}
+		
+		signal newSigVec2 = ntk.create_and(a, c);	//Creates (ac) gate with correct complement
+		
+		ntk.substitute_node(ntk.get_node(sigVec.at(0)), b);	//b replaces fanin 1 of n
+		ntk.substitute_node(ntk.get_node(sigVec.at(1)), newSigVec2);	//ac replaces fanin 2
+	}
+
+ 	
+	return true;
+  }
+  
+  /* Try the three layer distributivity rule on node n. Return true if the network is updated. */
+  bool try_3_layer_distributivity( node n )
+  {
+  	std::vector<signal> sigVec;
+  	
+	ntk.foreach_fanin( n, [&]( signal sig ){ sigVec.push_back(sig); });	//Extracts the fanin signals
+	
+	if(sigVec.size() != 2){
+		return false;	//No optimization if we don't have 2 fanin signals or correct shape
+	}
+	if(ntk.fanout_size(ntk.get_node(sigVec.at(0))) != 1 || ntk.fanout_size(ntk.get_node(sigVec.at(1))) != 1){
+		return false;	//Not an AND
+	}
+
+	signal x4, sigH;
+	
+	if(ntk.level(ntk.get_node(sigVec.at(0))) > ntk.level(ntk.get_node(sigVec.at(1)))){	//Checks which node to bring up, sets it in sigH
+		sigH = sigVec.at(0);
+		x4 = sigVec.at(1);
+	}else if(ntk.level(ntk.get_node(sigVec.at(0))) < ntk.level(ntk.get_node(sigVec.at(1)))){
+		sigH = sigVec.at(1);
+		x4 = sigVec.at(0);
+	}else{
+		return false;
+	}
+
+	std::vector<signal> sigVec2;
+	ntk.foreach_fanin( ntk.get_node(sigH), [&]( signal sig ){ sigVec2.push_back(sig); });	//Extracts the fanin signals
+	
+	if(sigVec2.size() != 2 || ntk.is_complemented(sigH) == 0){
+		return false;	//No optimization if we don't have 2 fanin signals or correct shape
+	}
+	if(ntk.fanout_size(ntk.get_node(sigVec2.at(0))) != 1 || ntk.fanout_size(ntk.get_node(sigVec2.at(1))) != 1){
+		return false;	//Not an OR
+	}
+	
+ 	signal x3, sigH2;
+ 	
+	if(ntk.level(ntk.get_node(sigVec2.at(0))) > ntk.level(ntk.get_node(sigVec2.at(1)))){	//Checks which node to bring up, sets it in sigH2
+		sigH2 = sigVec2.at(0);
+		x3 = !sigVec2.at(1);
+	}else{
+		sigH2 = sigVec2.at(1);
+		x3 = !sigVec2.at(0);
+	}
+ 	
+	std::vector<signal> sigVec3;
+	ntk.foreach_fanin( ntk.get_node(sigH2), [&]( signal sig ){ sigVec3.push_back(sig); });	//Extracts the fanin signals
+	
+	if(sigVec3.size() != 2 || ntk.is_complemented(sigH2) == 0){
+		return false;	//No optimization if we don't have 2 fanin signals or correct shape
+	}
+
+	
+	signal g, x2;
+	if(ntk.level(ntk.get_node(sigVec3.at(0))) > ntk.level(ntk.get_node(sigVec3.at(1)))){	//Checks which node to bring up, sets it in sigH2
+		g = sigVec3.at(0);
+		x2 = sigVec3.at(1);
+	}else{
+		g = sigVec3.at(1);
+		x2 = sigVec3.at(0);
+	}
+	
+	//Rebuilds corrected circuit:
+	signal newOut = ntk.create_nand(ntk.create_nand(g, ntk.create_and(x2,x4)), ntk.create_nand(x3,x4));
+	
+	ntk.substitute_node(n, newOut);
+
+	return true;
   }
 
 private:
