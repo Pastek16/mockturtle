@@ -63,10 +63,10 @@ private:
   }
 
   /* Try the associativity rule on node n. Return true if the network is updated. */
-  bool try_associativity( node n )
-  { 	
-  	std::vector<signal> sigVec;
-  	
+	bool try_associativity( node n )
+	{ 	
+		std::vector<signal> sigVec;
+		
 	ntk.foreach_fanin( n, [&]( signal sig ){ sigVec.push_back(sig); });	//Extracts the fanin signals
 	
 	if(sigVec.size() != 2){
@@ -121,7 +121,7 @@ private:
   bool try_distributivity( node n )
   {
   	std::vector<signal> sigVec;
-  	
+		
 	ntk.foreach_fanin( n, [&]( signal sig ){ sigVec.push_back(sig); });	//Extracts the fanin signals
 	
 	if(sigVec.size() != 2){
@@ -202,60 +202,56 @@ private:
   /* Try the three layer distributivity rule on node n. Return true if the network is updated. */
   bool try_3_layer_distributivity( node n )
   {
-  	std::vector<signal> sigVec;
-  	
-	ntk.foreach_fanin( n, [&]( signal sig ){ sigVec.push_back(sig); });	//Extracts the fanin signals
+
+	std::vector <signal> sigTop;
 	
-	if(sigVec.size() != 2){
-		return false;	//No optimization if we don't have 2 fanin signals or correct shape
+	ntk.foreach_fanin(n, [&](signal in){sigTop.push_back(in);});
+	
+	if(ntk.level(ntk.get_node(sigTop.at(0))) < ntk.level(ntk.get_node(sigTop.at(1)))){	//Deepest always on left
+		std::swap(sigTop.at(0), sigTop.at(1));
+	}
+	if(ntk.level(ntk.get_node(sigTop.at(1)))+3 > ntk.level(ntk.get_node(sigTop.at(0)))){
+		return false;
 	}
 
-	if(ntk.level(ntk.get_node(sigVec.at(0)))+1 < ntk.level(ntk.get_node(sigVec.at(1)))){
-		std::swap(sigVec.at(0), sigVec.at(1));
-	}else if(ntk.level(ntk.get_node(sigVec.at(1)))+1 < ntk.level(ntk.get_node(sigVec.at(0)))){
-		return false; //Nothing to gain from optimization
+	if(ntk.is_on_critical_path(ntk.get_node(sigTop.at(0))) == 0 || ntk.is_on_critical_path(ntk.get_node(sigTop.at(1))) != 0){
+		return false;	//Wrong conditions
 	}
 
-
-	if(!ntk.is_complemented(sigVec.at(0))){
-		return false;	//Wrong configuration for simplification
-	}
-
-  	std::vector<signal> sigVec2;
-  	
-	ntk.foreach_fanin( ntk.get_node(sigVec.at(0)), [&]( signal sig ){ sigVec2.push_back(sig); });	//Extracts the fanin signals
-	
-	if(sigVec2.size() != 2){
-		return false;	//No optimization if we don't have 2 fanin signals or correct shape
+	if(ntk.is_complemented(sigTop.at(0)) == 0){
+		return false;	//Wrong conditions
 	}
 	
-	if(ntk.level(ntk.get_node(sigVec2.at(0))) < ntk.level(ntk.get_node(sigVec2.at(1)))){
-		std::swap(sigVec2.at(0), sigVec2.at(1));
+	std::vector <signal> sigMid;
+	ntk.foreach_fanin(ntk.get_node(sigTop.at(0)), [&](signal in) {	sigMid.push_back(in);});
+
+	if(ntk.level(ntk.get_node(sigMid.at(0))) < ntk.level(ntk.get_node(sigMid.at(1)))){	//Deepest always on left
+		std::swap(sigMid.at(0), sigMid.at(1));
 	}
 
-	if(ntk.is_complemented(sigVec.at(0))){
-		return false;	//Wrong configuration for simplification
+	if(ntk.is_on_critical_path(ntk.get_node(sigMid.at(0))) == 0 || ntk.is_on_critical_path(ntk.get_node(sigMid.at(1))) != 0){
+		return false;	//Wrong conditions
 	}
 
-  	std::vector<signal> sigVec3;
-  	
-	ntk.foreach_fanin( ntk.get_node(sigVec2.at(0)), [&]( signal sig ){ sigVec3.push_back(sig); });	//Extracts the fanin signals
-	
-	if(sigVec3.size() != 2){
-		return false;	//No optimization if we don't have 2 fanin signals or correct shape
+	if(ntk.is_complemented(sigMid.at(0)) == 0){
+		return false;	//Wrong conditions
 	}
 	
-	if(ntk.level(ntk.get_node(sigVec3.at(0))) < ntk.level(ntk.get_node(sigVec3.at(1)))){
-		std::swap(sigVec3.at(0), sigVec3.at(1));
+	std::vector <signal> sigBot;
+	ntk.foreach_fanin(ntk.get_node(sigMid.at(0)), [&](signal in) {sigBot.push_back(in);});
+
+	if(ntk.level(ntk.get_node(sigBot.at(0))) < ntk.level(ntk.get_node(sigBot.at(1)))){	//Deepest always on left
+		std::swap(sigBot.at(0), sigBot.at(1));
 	}
+
+	if(ntk.is_on_critical_path(ntk.get_node(sigBot.at(0))) == 0 || ntk.is_on_critical_path(ntk.get_node(sigBot.at(1))) != 0){
+		return false;
+	}
+
+	signal newOut = ntk.create_nand(ntk.create_nand(sigBot.at(0), ntk.create_and(sigBot.at(1), sigTop.at(1))) , ntk.create_nand(!sigMid.at(1), sigTop.at(1)));
 	
-	signal x2x4 = ntk.create_and(sigVec3.at(1), sigVec.at(1));
-	signal gx2x4 = ntk.create_nand(sigVec3.at(0), x2x4);
-	signal x3x4 = ntk.create_nand(!(sigVec2.at(1)), sigVec.at(1));
-	signal newOutSig = ntk.create_nand(gx2x4, x3x4);
-	
-	ntk.substitute_node(n, newOutSig);
-	
+	ntk.substitute_node(n, newOut);
+
 	return true;
   }
 
