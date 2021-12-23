@@ -10,6 +10,7 @@
 #include "../networks/aig.hpp"
 #include "../views/depth_view.hpp"
 #include "../views/topo_view.hpp"
+#include <kitty/print.hpp>
 
 namespace mockturtle
 {
@@ -208,64 +209,53 @@ private:
 	if(sigVec.size() != 2){
 		return false;	//No optimization if we don't have 2 fanin signals or correct shape
 	}
-	if(ntk.fanout_size(ntk.get_node(sigVec.at(0))) != 1 || ntk.fanout_size(ntk.get_node(sigVec.at(1))) != 1){
-		return false;	//Not an AND
+
+	if(ntk.level(ntk.get_node(sigVec.at(0)))+1 < ntk.level(ntk.get_node(sigVec.at(1)))){
+		std::swap(sigVec.at(0), sigVec.at(1));
+	}else if(ntk.level(ntk.get_node(sigVec.at(1)))+1 < ntk.level(ntk.get_node(sigVec.at(0)))){
+		return false; //Nothing to gain from optimization
 	}
 
-	signal x4, sigH;
-	
-	if(ntk.level(ntk.get_node(sigVec.at(0))) > ntk.level(ntk.get_node(sigVec.at(1)))){	//Checks which node to bring up, sets it in sigH
-		sigH = sigVec.at(0);
-		x4 = sigVec.at(1);
-	}else if(ntk.level(ntk.get_node(sigVec.at(0))) < ntk.level(ntk.get_node(sigVec.at(1)))){
-		sigH = sigVec.at(1);
-		x4 = sigVec.at(0);
-	}else{
-		return false;
+
+	if(!ntk.is_complemented(sigVec.at(0))){
+		return false;	//Wrong configuration for simplification
 	}
 
-	std::vector<signal> sigVec2;
-	ntk.foreach_fanin( ntk.get_node(sigH), [&]( signal sig ){ sigVec2.push_back(sig); });	//Extracts the fanin signals
+  	std::vector<signal> sigVec2;
+  	
+	ntk.foreach_fanin( ntk.get_node(sigVec.at(0)), [&]( signal sig ){ sigVec2.push_back(sig); });	//Extracts the fanin signals
 	
-	if(sigVec2.size() != 2 || ntk.is_complemented(sigH) == 0){
+	if(sigVec2.size() != 2){
 		return false;	//No optimization if we don't have 2 fanin signals or correct shape
 	}
-	if(ntk.fanout_size(ntk.get_node(sigVec2.at(0))) != 1 || ntk.fanout_size(ntk.get_node(sigVec2.at(1))) != 1){
-		return false;	//Not an OR
-	}
 	
- 	signal x3, sigH2;
- 	
-	if(ntk.level(ntk.get_node(sigVec2.at(0))) > ntk.level(ntk.get_node(sigVec2.at(1)))){	//Checks which node to bring up, sets it in sigH2
-		sigH2 = sigVec2.at(0);
-		x3 = !sigVec2.at(1);
-	}else{
-		sigH2 = sigVec2.at(1);
-		x3 = !sigVec2.at(0);
+	if(ntk.level(ntk.get_node(sigVec2.at(0))) < ntk.level(ntk.get_node(sigVec2.at(1)))){
+		std::swap(sigVec2.at(0), sigVec2.at(1));
 	}
- 	
-	std::vector<signal> sigVec3;
-	ntk.foreach_fanin( ntk.get_node(sigH2), [&]( signal sig ){ sigVec3.push_back(sig); });	//Extracts the fanin signals
+
+	if(ntk.is_complemented(sigVec.at(0))){
+		return false;	//Wrong configuration for simplification
+	}
+
+  	std::vector<signal> sigVec3;
+  	
+	ntk.foreach_fanin( ntk.get_node(sigVec2.at(0)), [&]( signal sig ){ sigVec3.push_back(sig); });	//Extracts the fanin signals
 	
-	if(sigVec3.size() != 2 || ntk.is_complemented(sigH2) == 0){
+	if(sigVec3.size() != 2){
 		return false;	//No optimization if we don't have 2 fanin signals or correct shape
 	}
-
 	
-	signal g, x2;
-	if(ntk.level(ntk.get_node(sigVec3.at(0))) > ntk.level(ntk.get_node(sigVec3.at(1)))){	//Checks which node to bring up, sets it in sigH2
-		g = sigVec3.at(0);
-		x2 = sigVec3.at(1);
-	}else{
-		g = sigVec3.at(1);
-		x2 = sigVec3.at(0);
+	if(ntk.level(ntk.get_node(sigVec3.at(0))) < ntk.level(ntk.get_node(sigVec3.at(1)))){
+		std::swap(sigVec3.at(0), sigVec3.at(1));
 	}
 	
-	//Rebuilds corrected circuit:
-	signal newOut = ntk.create_nand(ntk.create_nand(g, ntk.create_and(x2,x4)), ntk.create_nand(x3,x4));
+	signal x2x4 = ntk.create_and(sigVec3.at(1), sigVec.at(1));
+	signal gx2x4 = ntk.create_nand(sigVec3.at(0), x2x4);
+	signal x3x4 = ntk.create_nand(!(sigVec2.at(1)), sigVec.at(1));
+	signal newOutSig = ntk.create_nand(gx2x4, x3x4);
 	
-	ntk.substitute_node(n, newOut);
-
+	ntk.substitute_node(n, newOutSig);
+	
 	return true;
   }
 
